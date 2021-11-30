@@ -356,34 +356,16 @@ class OrcaFusion:
     def get_trigger_mode(self):
         return self._get_property(PROPERTY_CODES["TRIGGERSOURCE"])
 
-    def access_image(self):
-        """Access images after capture."""
-        # transfer info param
-        captransferinfo = DCAMCAP_TRANSFERINFO()
-        ctypes.memset(byref(captransferinfo), 0,
-                      ctypes.sizeof(captransferinfo))
-        captransferinfo.size = ctypes.sizeof(captransferinfo)
-
-        #get number of captured images
-        err = self.lib.dcamcap_transferinfo(self.camera_handle,
-                                            byref(captransferinfo))
-        self._check_err(err)
-        print(f"captured {captransferinfo.nFrameCount} frames")
-        print(f"index of newest frame {captransferinfo.nNewestFrameIndex}")
-
-        # get image information
+    def access_frame(self):
+        """Access data from a single frame."""
         width = int(self._get_property(PROPERTY_CODES["IMAGE_WIDTH"]))
-        print("image width ", width)
         height = int(self._get_property(PROPERTY_CODES["IMAGE_HEIGHT"]))
-        print("image height ", height)
         rowbytes = int(self._get_property(PROPERTY_CODES["IMAGE_ROWBYTES"]))
-        print("image row bytes ", rowbytes)
         pixel_type = int(self._get_property(PROPERTY_CODES["IMAGE_PIXELTYPE"]))
-        print("image pixel type ", pixel_type)
 
-        # allocate buffer
-        buf = (2 * width * height * c_int32)()
-        img_raw = np.empty(2 * width * height, dtype=np.uint16)
+        bsize = 2 * width * height
+        buf = (bsize * c_int32)()
+        img_raw = np.empty(bsize, dtype=np.uint16)
 
         # prepare frame param
         bufframe = DCAMBUF_FRAME()
@@ -399,10 +381,8 @@ class OrcaFusion:
         bufframe.height = c_int32(height)
         bufframe.type = c_int32(pixel_type)
 
-        for i in range(captransferinfo.nFrameCount):
-            err = self.lib.dcambuf_lockframe(self.camera_handle,
-                                             byref(bufframe))
-            self._check_err(err)
+        err = self.lib.dcambuf_lockframe(self.camera_handle, byref(bufframe))
+        self._check_err(err)
 
         ctypes.memmove(img_raw.ctypes.data, bufframe.buf, img_raw.nbytes)
 
@@ -449,7 +429,7 @@ class OrcaFusion:
         print("Stop capture")
 
         print("Copying image")
-        img = self.access_image()
+        img = self.access_frame()
 
         #release buffer
         self.lib.dcambuf_release(self.camera_handle, 1)
