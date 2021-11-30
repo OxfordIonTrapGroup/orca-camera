@@ -358,7 +358,6 @@ class OrcaFusion:
 
     def access_image(self):
         """Access images after capture."""
-        # TODO: fix image data manipulation
         # transfer info param
         captransferinfo = DCAMCAP_TRANSFERINFO()
         ctypes.memset(byref(captransferinfo), 0,
@@ -384,7 +383,7 @@ class OrcaFusion:
 
         # allocate buffer
         buf = (2 * width * height * c_int32)()
-        ctypes.memset(buf, 0, 2 * width * height)
+        img_raw = np.empty(2 * width * height, dtype=np.uint16)
 
         # prepare frame param
         bufframe = DCAMBUF_FRAME()
@@ -401,16 +400,15 @@ class OrcaFusion:
         bufframe.type = c_int32(pixel_type)
 
         for i in range(captransferinfo.nFrameCount):
-            err = self.lib.dcambuf_copyframe(self.camera_handle,
+            err = self.lib.dcambuf_lockframe(self.camera_handle,
                                              byref(bufframe))
             self._check_err(err)
 
-        img_raw = np.frombuffer(buf, dtype=np.int32)
-        print(len(img_raw))
+        ctypes.memmove(img_raw.ctypes.data, bufframe.buf, img_raw.nbytes)
+
         img = np.zeros((width, height))
-        print(len(img))
         for i in range(height):
-            img[i] = img_raw[i * int(rowbytes / 2):(i + 1) * int(rowbytes / 2)]
+            img[i] = img_raw[i * int(width):(i + 1) * int(width)]
 
         return img
 
