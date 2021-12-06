@@ -400,7 +400,10 @@ class OrcaFusion:
         running in SEQUENCE mode capturing continues until sto_capture()
         is called.
         :param n_buf: Number of frames to capture if running in SNAP
-        mode.
+        mode. Maximum number of frames to store if running in SEQUENCE
+        mode. If running in SEQUENCE mode, frames are stored in batches
+        of n_buf: when the number of captured frames is equal to n_buf,
+        the buffer is cleared for a new batch of n_buf frames.
         """
         n = c_int32(n_buf)
         err = self.lib.dcambuf_alloc(self.camera_handle, n_buf)
@@ -459,7 +462,6 @@ class OrcaFusion:
         return img
 
     def _get_all_images(self):
-        time.sleep(20e-3)
         transferinfo = DCAMCAP_TRANSFERINFO()
         transferinfo.size = ctypes.sizeof(transferinfo)
         self._check_err(self.lib.dcamcap_transferinfo(self.camera_handle, transferinfo))
