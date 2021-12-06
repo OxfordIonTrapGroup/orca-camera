@@ -285,6 +285,12 @@ class OrcaFusion:
         print(f"Found {self.num_dev} devices.")
 
     def open(self, camera_index, framebuffer_len=100):
+        """
+        Open a connection to the camera.
+        :param camera_index: index of the camera to connect to
+        :param framebuffer_len: maximum number of stored frames before
+        oldest are discarded
+        """
         self.dcamdev_open_struct = DCAMDEV_OPEN(size=32, index=camera_index)
         open_code = self.lib.dcamdev_open(byref(self.dcamdev_open_struct))
         if open_code == 1:
@@ -337,6 +343,14 @@ class OrcaFusion:
         return self._set_property(PROPERTY_CODES["EXPOSURETIME"], t)
 
     def set_subarray(self, xmin, xsize, ymin, ysize):
+        """
+        Set the region of interest in pixels. Pixel indexing starts from
+        0 with x=0 being the leftmost pixel, and y=0 being the top pixel.
+        :param xmin: leftmost pixel number
+        :param xsize: horizontal extent of the region
+        :param ymin: top pixel number
+        :param ysize: vertical extent of the region
+        """
         self._set_property(PROPERTY_CODES["SUBARRAYMODE"], 1)
         self._set_property(PROPERTY_CODES["SUBARRAYHPOS"], xmin)
         self._set_property(PROPERTY_CODES["SUBARRAYHSIZE"], xsize)
@@ -355,8 +369,8 @@ class OrcaFusion:
     def set_trigger_source(self, mode):
         """
         Set the camera trigger source.
-        :param source: The trigger source. 1-internal. 2-external. 3-software.
-        4-master pulse.
+        :param source: The trigger source. 1-internal. 2-external.
+        3-software. 4-master pulse.
         """
         return self._set_property(PROPERTY_CODES["TRIGGERSOURCE"], mode)
 
@@ -364,7 +378,13 @@ class OrcaFusion:
         return self._get_property(PROPERTY_CODES["TRIGGERSOURCE"])
 
     def access_frame(self, frame_idx=-1):
-        """Access data from a single frame."""
+        """
+        Access data from a single frame.
+        :param frame_idx: index of the frame; set to -1 to access the
+        latest frame
+        :return: the image corresponding to the specified frame index as
+        a 2D numpy array
+        """
         width = int(self._get_property(PROPERTY_CODES["IMAGE_WIDTH"]))
         height = int(self._get_property(PROPERTY_CODES["IMAGE_HEIGHT"]))
         rowbytes = int(self._get_property(PROPERTY_CODES["IMAGE_ROWBYTES"]))
@@ -410,7 +430,9 @@ class OrcaFusion:
         mode. Maximum number of frames to store if running in SEQUENCE
         mode. If running in SEQUENCE mode, frames are stored in batches
         of n_buf: when the number of captured frames is equal to n_buf,
-        the buffer is cleared for a new batch of n_buf frames.
+        the buffer is cleared for a new batch of n_buf frames. This is
+        somewhat solved by the image acquisition thread that sotres the
+        last self.framebuff_len frames in a buffer.
         """
         n = c_int32(n_buf)
         err = self.lib.dcambuf_alloc(self.camera_handle, n_buf)
@@ -421,11 +443,19 @@ class OrcaFusion:
 
     def stop_capture(self):
         """
-        Stop capturing if running in SEQUENCE mode.
+        Stop capturing. This method will interrupt capturing in SNAP
+        mode even if the required number of frames has not been
+        reached.
         """
         self.lib.dcamcap_stop(self.camera_handle)
 
     def get_single_image(self):
+        """
+        Start capturing and wait until a single image is acquired. This
+        is the simplest method to acquire a single image.
+
+        :return: The image as a 2D numpy array.
+        """
         # open wait handle
         waitopen = DCAMWAIT_OPEN()
         ctypes.memset(byref(waitopen), 0, ctypes.sizeof(waitopen))
@@ -469,6 +499,12 @@ class OrcaFusion:
         return img
 
     def _get_all_images(self):
+        """
+        Gets all images stored in the camera buffer.
+
+        :return: A list of 2D numpy arrays. The last entry in the list
+        corresponds to the most recent frame.
+        """
         transferinfo = DCAMCAP_TRANSFERINFO()
         transferinfo.size = ctypes.sizeof(transferinfo)
         self._check_err(self.lib.dcamcap_transferinfo(self.camera_handle, transferinfo))
@@ -507,20 +543,22 @@ class OrcaFusion:
 
     def get_image(self):
         """Returns the oldest image in the buffer as a numpy array, or
-        None if no new images"""
+        None if no new images."""
         if len(self.frame_buffer) == 0:
             return None
+
         return self.frame_buffer.popleft()
 
     def wait_for_image(self):
         """Returns the oldest image in the buffer as a numpy array,
-        blocking until there is an image available"""
+        blocking until there is an image available."""
         while True:
-            im = self.get_image()
-            if im is not None:
+            image = self.get_image()
+            if image is not None:
                 break
             time.sleep(10e-3)
-        return im
+
+        return image
 
     def flush_images(self):
         """Delete all images from the buffer"""
