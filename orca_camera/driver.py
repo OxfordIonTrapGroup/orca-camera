@@ -533,7 +533,7 @@ class OrcaFusion:
         Get all images stored in the frame buffer.
         """
         if len(self.frame_buffer):
-            imsages= []
+            images= []
             while len(self.frame_buffer) > 0:
                 images.append(self.frame_buffer.popleft())
         else:
