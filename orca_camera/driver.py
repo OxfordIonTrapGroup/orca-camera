@@ -284,7 +284,7 @@ class OrcaFusion:
         self.num_dev = self.dcamapi_init_struct.iDeviceCount
         print(f"Found {self.num_dev} devices.")
 
-    def open(self, camera_index):
+    def open(self, camera_index, framebuffer_len=100):
         self.dcamdev_open_struct = DCAMDEV_OPEN(size=32, index=camera_index)
         open_code = self.lib.dcamdev_open(byref(self.dcamdev_open_struct))
         if open_code == 1:
@@ -295,6 +295,13 @@ class OrcaFusion:
             print("Connection to camera unsuccessful.")
 
         self.camera_handle = self.dcamdev_open_struct.hdcam
+        self.frame_buffer = collections.deque([], framebuffer_len)
+
+        self._stopping = threading.Event()
+
+        # Start image acquisition thread
+        self._thread = threading.Thread(target=self._acquisition_thread, daemon=True)
+        self._thread.start()
 
     def _check_err(self, err):
         err_code = hex(((abs(err) ^ 0xffffffff) + 1) & 0xffffffff)
@@ -409,7 +416,7 @@ class OrcaFusion:
         err = self.lib.dcambuf_alloc(self.camera_handle, n_buf)
         self._check_err(err)
 
-        err = self.lib.dcamcap_start(self.camera_handle, -1)
+        err = self.lib.dcamcap_start(self.camera_handle, mode)
         self._check_err(err)
 
     def stop_capture(self):
@@ -471,7 +478,23 @@ class OrcaFusion:
 
         return images
 
+    def _acquisition_thread(self):
+        while True:
+            time.sleep(20e-3)
+            if self._stopping.is_set():
+                break
+
+            images = self._get_all_images()
+
+            if images is None:
+                continue
+
+            for img in images:
+                self.frame_buffer.append(img)
+
     def close(self):
+        self._stopping.set()
+        self._thread.join()
         self.lib.dcamdev_close(self.camera_handle)
         print("Connection to camera closed.")
         self.lib.dcamapi_uninit()
