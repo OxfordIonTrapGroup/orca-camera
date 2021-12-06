@@ -370,7 +370,7 @@ class OrcaFusion:
         # prepare frame param
         bufframe = DCAMBUF_FRAME()
         bufframe.size = ctypes.sizeof(bufframe)
-        bufframe.iFrame = frame_idx  # latest frame
+        bufframe.iFrame = c_int32(frame_idx)
         bufframe.buf = ctypes.cast(byref(buf), POINTER(c_void_p))
         bufframe.rowbytes = c_int32(rowbytes)
         bufframe.left = c_int32(0)
@@ -463,10 +463,9 @@ class OrcaFusion:
         transferinfo = DCAMCAP_TRANSFERINFO()
         transferinfo.size = ctypes.sizeof(transferinfo)
         self._check_err(self.lib.dcamcap_transferinfo(self.camera_handle, transferinfo))
-
         images = []
-        for i in range(transferinfo.nFrameCount):
-            images.append(self.access_frame())
+        for i in range(transferinfo.nNewestFrameIndex):
+            images.append(self.access_frame(i))
 
         return images
 
