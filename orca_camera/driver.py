@@ -425,7 +425,7 @@ class OrcaFusion:
         """
         self.lib.dcamcap_stop(self.camera_handle)
 
-    def get_image(self):
+    def get_single_image(self):
         # open wait handle
         waitopen = DCAMWAIT_OPEN()
         ctypes.memset(byref(waitopen), 0, ctypes.sizeof(waitopen))
