@@ -356,7 +356,7 @@ class OrcaFusion:
     def get_trigger_mode(self):
         return self._get_property(PROPERTY_CODES["TRIGGERSOURCE"])
 
-    def access_frame(self):
+    def access_frame(self, frame_idx=-1):
         """Access data from a single frame."""
         width = int(self._get_property(PROPERTY_CODES["IMAGE_WIDTH"]))
         height = int(self._get_property(PROPERTY_CODES["IMAGE_HEIGHT"]))
@@ -369,9 +369,8 @@ class OrcaFusion:
 
         # prepare frame param
         bufframe = DCAMBUF_FRAME()
-        ctypes.memset(byref(bufframe), 0, ctypes.sizeof(bufframe))
         bufframe.size = ctypes.sizeof(bufframe)
-        bufframe.iFrame = 0  # latest frame
+        bufframe.iFrame = frame_idx  # latest frame
         bufframe.buf = ctypes.cast(byref(buf), POINTER(c_void_p))
         bufframe.rowbytes = c_int32(rowbytes)
         bufframe.left = c_int32(0)
@@ -392,6 +391,30 @@ class OrcaFusion:
 
         return img
 
+    def start_capture(self, mode=-1, n_buf=1):
+        """
+        Start capture.
+        :param mode: Capture mode. Set to 0 for SNAP mode and to -1 for
+        SEQUENCE mode. When running in SNAP mode, capturing continues
+        until the buffer is filled or stop_capture() is called. When
+        running in SEQUENCE mode capturing continues until sto_capture()
+        is called.
+        :param n_buf: Number of frames to capture if running in SNAP
+        mode.
+        """
+        n = c_int32(n_buf)
+        err = self.lib.dcambuf_alloc(self.camera_handle, n_buf)
+        self._check_err(err)
+
+        err = self.lib.dcamcap_start(self.camera_handle, -1)
+        self._check_err(err)
+
+    def stop_capture(self):
+        """
+        Stop capturing if running in SEQUENCE mode.
+        """
+        self.lib.dcamcap_stop(self.camera_handle)
+
     def get_image(self):
         # open wait handle
         waitopen = DCAMWAIT_OPEN()
@@ -408,7 +431,6 @@ class OrcaFusion:
         self._check_err(err)
 
         # start capture
-        print("Start capture")
         err = self.lib.dcamcap_start(self.camera_handle, -1)
         self._check_err(err)
 
@@ -426,9 +448,6 @@ class OrcaFusion:
 
         self.lib.dcamcap_stop(self.camera_handle)
 
-        print("Stop capture")
-
-        print("Copying image")
         img = self.access_frame()
 
         #release buffer
@@ -436,9 +455,20 @@ class OrcaFusion:
 
         # close wait handle
         self.lib.dcamwait_close(waitopen.hwait)
-        print("Done")
 
         return img
+
+    def _get_all_images(self):
+        time.sleep(20e-3)
+        transferinfo = DCAMCAP_TRANSFERINFO()
+        transferinfo.size = ctypes.sizeof(transferinfo)
+        self._check_err(self.lib.dcamcap_transferinfo(self.camera_handle, transferinfo))
+
+        images = []
+        for i in range(transferinfo.nFrameCount):
+            images.append(self.access_frame())
+
+        return images
 
     def close(self):
         self.lib.dcamdev_close(self.camera_handle)
