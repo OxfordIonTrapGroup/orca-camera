@@ -492,6 +492,41 @@ class OrcaFusion:
             for img in images:
                 self.frame_buffer.append(img)
 
+    def get_all_images(self):
+        """
+        Get all images stored in the frame buffer.
+        """
+        if len(self.frame_buffer):
+            imsages= []
+            while len(self.frame_buffer) > 0:
+                images.append(self.frame_buffer.popleft())
+        else:
+            images = None
+
+        return images
+
+    def get_image(self):
+        """Returns the oldest image in the buffer as a numpy array, or
+        None if no new images"""
+        if len(self.frame_buffer) == 0:
+            return None
+        return self.frame_buffer.popleft()
+
+    def wait_for_image(self):
+        """Returns the oldest image in the buffer as a numpy array,
+        blocking until there is an image available"""
+        while True:
+            im = self.get_image()
+            if im is not None:
+                break
+            time.sleep(10e-3)
+        return im
+
+    def flush_images(self):
+        """Delete all images from the buffer"""
+        while len(self.frame_buffer) > 0:
+            self.frame_buffer.popleft()
+
     def close(self):
         self._stopping.set()
         self._thread.join()
