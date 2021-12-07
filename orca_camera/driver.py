@@ -306,7 +306,7 @@ class OrcaFusion:
         self._stopping = threading.Event()
 
         # Start image acquisition thread
-        self._thread = threading.Thread(target=self._acquisition_thread, daemon=True)
+        self._thread = threading.Thread(target=self._acquisition_thread)#, daemon=True)
         self._thread.start()
 
     def _check_err(self, err):
@@ -435,7 +435,7 @@ class OrcaFusion:
         last self.framebuff_len frames in a buffer.
         """
         n = c_int32(n_buf)
-        err = self.lib.dcambuf_alloc(self.camera_handle, n_buf)
+        err = self.lib.dcambuf_alloc(self.camera_handle, n)
         self._check_err(err)
 
         err = self.lib.dcamcap_start(self.camera_handle, mode)
@@ -509,24 +509,40 @@ class OrcaFusion:
         transferinfo.size = ctypes.sizeof(transferinfo)
         self._check_err(self.lib.dcamcap_transferinfo(self.camera_handle, transferinfo))
         images = []
+        print(transferinfo.nNewestFrameIndex)
         for i in range(transferinfo.nNewestFrameIndex):
             images.append(self.access_frame(i))
 
         return images
 
     def _acquisition_thread(self):
+        # open wait handle
+        waitopen = DCAMWAIT_OPEN()
+        ctypes.memset(byref(waitopen), 0, ctypes.sizeof(waitopen))
+        waitopen.size = ctypes.sizeof(waitopen)
+        waitopen.hdcam = self.camera_handle
+
+        err = self.lib.dcamwait_open(byref(waitopen))
+        self._check_err(err)
+
+        # wait start param
+        waitstart = DCAMWAIT_START()
+        ctypes.memset(byref(waitstart), 0, ctypes.sizeof(waitstart))
+        waitstart.size = ctypes.sizeof(waitstart)
+        waitstart.eventmask = c_int32(2)
+        waitstart.timeout = c_int32(5000)
+
         while True:
-            time.sleep(20e-3)
             if self._stopping.is_set():
                 break
 
-            images = self._get_all_images()
+            err = self.lib.dcamwait_start(waitopen.hwait,
+                                          ctypes.pointer(waitstart))
+            self._check_err(err)
 
-            if images is None:
-                continue
+            self.frame_buffer.append(self.access_frame())
 
-            for img in images:
-                self.frame_buffer.append(img)
+        self.lib.dcamwait_close(waitopen.hwait)
 
     def get_all_images(self):
         """
@@ -566,6 +582,7 @@ class OrcaFusion:
             self.frame_buffer.popleft()
 
     def close(self):
+        print("Stopping acqusition thread.")
         self._stopping.set()
         self._thread.join()
         self.lib.dcamdev_close(self.camera_handle)
