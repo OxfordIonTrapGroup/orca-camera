@@ -418,7 +418,7 @@ class OrcaFusion:
 
         return img
 
-    def start_capture(self, mode=-1, n_buf=1):
+    def start_capture(self, mode=-1, n_buf=10):
         """
         Start capture.
         :param mode: Capture mode. Set to 0 for SNAP mode and to -1 for
