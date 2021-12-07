@@ -306,13 +306,20 @@ class OrcaFusion:
         self._stopping = threading.Event()
 
         # Start image acquisition thread
-        self._thread = threading.Thread(target=self._acquisition_thread)#, daemon=True)
+        self._thread = threading.Thread(target=self._acquisition_thread, daemon=True)
         self._thread.start()
 
     def _check_err(self, err):
         err_code = hex(((abs(err) ^ 0xffffffff) + 1) & 0xffffffff)
         if err != 1:
             raise Exception(ERROR_CODES[err_code])
+
+    def _err_code(self, err):
+        if err == 1:
+            return
+        err_code = hex(((abs(err) ^ 0xffffffff) + 1) & 0xffffffff)
+
+        return ERROR_CODES[err_code]
 
     def _get_property(self, code):
         result = c_double()
@@ -441,12 +448,16 @@ class OrcaFusion:
         err = self.lib.dcamcap_start(self.camera_handle, mode)
         self._check_err(err)
 
-    def stop_capture(self):
+        self._thread.join()
+
+    def stop_capture(self, force=False):
         """
         Stop capturing. This method will interrupt capturing in SNAP
         mode even if the required number of frames has not been
         reached.
         """
+        if force:
+            self._stopping.set()
         self.lib.dcamcap_stop(self.camera_handle)
 
     def get_single_image(self):
@@ -538,9 +549,12 @@ class OrcaFusion:
 
             err = self.lib.dcamwait_start(waitopen.hwait,
                                           ctypes.pointer(waitstart))
-            self._check_err(err)
+
+            if self._err_code(err) == "timeout":
+                break
 
             self.frame_buffer.append(self.access_frame())
+            print(len(self.frame_buffer))
 
         self.lib.dcamwait_close(waitopen.hwait)
 
