@@ -6,6 +6,7 @@ import numpy as np
 import collections
 import threading
 import contextlib
+from enum import Enum
 
 from ctypes import c_int32, c_short, c_double, c_void_p, c_char, POINTER, byref
 from ctypes.wintypes import HANDLE
@@ -275,6 +276,17 @@ class LibInstance:
         # TODO: add recording control
 
 
+class Trigger(Enum):
+    INTERNAL = 1
+    EXTERNAL = 2
+
+
+class Speed(Enum):
+    QUIET = 1
+    STANDARD = 2
+    FAST = 3
+
+
 class OrcaFusion:
     def __init__(self):
         self.lib = LibInstance()
@@ -349,6 +361,18 @@ class OrcaFusion:
         """
         return self._set_property(PROPERTY_CODES["EXPOSURETIME"], t)
 
+    def set_readout_speed(self, speed=Speed.STANDARD):
+        """
+        Set the camera readout speed.
+        """
+        return self._set_property(PROPERTY_CODES["READOUTSPEED"], speed)
+
+    def get_internal_frame_rate(self):
+        """
+        Get the frame rate of the camera when internally triggered.
+        """
+        return self._get_property(PROPERTY_CODES["INTERNALFRAMERATE"])
+
     def set_subarray(self, xmin, xsize, ymin, ysize):
         """
         Set the region of interest in pixels. Pixel indexing starts from
@@ -373,18 +397,16 @@ class OrcaFusion:
 
         return xmin, xsize, ymin, ysize
 
-    def set_trigger_source(self, mode):
+    def set_trigger_source(self, mode=Trigger.INTERNAL):
         """
         Set the camera trigger source.
-        :param source: The trigger source. 1-internal. 2-external.
-        3-software. 4-master pulse.
         """
         return self._set_property(PROPERTY_CODES["TRIGGERSOURCE"], mode)
 
     def get_trigger_mode(self):
         return self._get_property(PROPERTY_CODES["TRIGGERSOURCE"])
 
-    def access_frame(self, frame_idx=-1):
+    def _access_frame(self, frame_idx=-1):
         """
         Access data from a single frame.
         :param frame_idx: index of the frame; set to -1 to access the
@@ -423,108 +445,25 @@ class OrcaFusion:
         for i in range(height):
             img[i] = img_raw[i * int(width):(i + 1) * int(width)]
 
-        return img
+        return np.array(img)
 
-    def start_capture(self, mode=-1, n_buf=10):
+    def start_capture(self):
         """
         Start capture.
-        :param mode: Capture mode. Set to 0 for SNAP mode and to -1 for
-        SEQUENCE mode. When running in SNAP mode, capturing continues
-        until the buffer is filled or stop_capture() is called. When
-        running in SEQUENCE mode capturing continues until sto_capture()
-        is called.
-        :param n_buf: Number of frames to capture if running in SNAP
-        mode. Maximum number of frames to store if running in SEQUENCE
-        mode. If running in SEQUENCE mode, frames are stored in batches
-        of n_buf: when the number of captured frames is equal to n_buf,
-        the buffer is cleared for a new batch of n_buf frames. This is
-        somewhat solved by the image acquisition thread that sotres the
-        last self.framebuff_len frames in a buffer.
         """
-        n = c_int32(n_buf)
-        err = self.lib.dcambuf_alloc(self.camera_handle, n)
+        err = self.lib.dcambuf_alloc(self.camera_handle, c_int32(10))
         self._check_err(err)
 
-        err = self.lib.dcamcap_start(self.camera_handle, mode)
+        err = self.lib.dcamcap_start(self.camera_handle, -1)
         self._check_err(err)
 
-        self._thread.join()
-
-    def stop_capture(self, force=False):
+    def stop_capture(self):
         """
         Stop capturing. This method will interrupt capturing in SNAP
         mode even if the required number of frames has not been
         reached.
         """
-        if force:
-            self._stopping.set()
         self.lib.dcamcap_stop(self.camera_handle)
-
-    def get_single_image(self):
-        """
-        Start capturing and wait until a single image is acquired. This
-        is the simplest method to acquire a single image.
-
-        :return: The image as a 2D numpy array.
-        """
-        # open wait handle
-        waitopen = DCAMWAIT_OPEN()
-        ctypes.memset(byref(waitopen), 0, ctypes.sizeof(waitopen))
-        waitopen.size = ctypes.sizeof(waitopen)
-        waitopen.hdcam = self.camera_handle
-
-        err = self.lib.dcamwait_open(byref(waitopen))
-        self._check_err(err)
-
-        # allocate buffer
-        n_buf = c_int32(1)
-        err = self.lib.dcambuf_alloc(self.camera_handle, n_buf)
-        self._check_err(err)
-
-        # start capture
-        err = self.lib.dcamcap_start(self.camera_handle, -1)
-        self._check_err(err)
-
-        # wait start param
-        waitstart = DCAMWAIT_START()
-        ctypes.memset(byref(waitstart), 0, ctypes.sizeof(waitstart))
-        waitstart.size = ctypes.sizeof(waitstart)
-        waitstart.eventmask = c_int32(2)
-        waitstart.timeout = c_int32(1000)
-
-        # wait image
-        err = self.lib.dcamwait_start(waitopen.hwait,
-                                      ctypes.pointer(waitstart))
-        self._check_err(err)
-
-        self.lib.dcamcap_stop(self.camera_handle)
-
-        img = self.access_frame()
-
-        #release buffer
-        self.lib.dcambuf_release(self.camera_handle, 1)
-
-        # close wait handle
-        self.lib.dcamwait_close(waitopen.hwait)
-
-        return img
-
-    def _get_all_images(self):
-        """
-        Gets all images stored in the camera buffer.
-
-        :return: A list of 2D numpy arrays. The last entry in the list
-        corresponds to the most recent frame.
-        """
-        transferinfo = DCAMCAP_TRANSFERINFO()
-        transferinfo.size = ctypes.sizeof(transferinfo)
-        self._check_err(self.lib.dcamcap_transferinfo(self.camera_handle, transferinfo))
-        images = []
-        print(transferinfo.nNewestFrameIndex)
-        for i in range(transferinfo.nNewestFrameIndex):
-            images.append(self.access_frame(i))
-
-        return images
 
     def _acquisition_thread(self):
         # open wait handle
@@ -541,7 +480,7 @@ class OrcaFusion:
         ctypes.memset(byref(waitstart), 0, ctypes.sizeof(waitstart))
         waitstart.size = ctypes.sizeof(waitstart)
         waitstart.eventmask = c_int32(2)
-        waitstart.timeout = c_int32(5000)
+        waitstart.timeout = c_int32(0x80000000)
 
         while True:
             if self._stopping.is_set():
@@ -550,11 +489,9 @@ class OrcaFusion:
             err = self.lib.dcamwait_start(waitopen.hwait,
                                           ctypes.pointer(waitstart))
 
-            if self._err_code(err) == "timeout":
-                break
+            self._check_err(err)
 
-            self.frame_buffer.append(self.access_frame())
-            print(len(self.frame_buffer))
+            self.frame_buffer.append(self._access_frame())
 
         self.lib.dcamwait_close(waitopen.hwait)
 
