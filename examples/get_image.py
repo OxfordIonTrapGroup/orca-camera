@@ -12,5 +12,5 @@ if __name__ == "__main__":
     dev.start_capture()
     img = dev.wait_for_image()
     dev.close()
-    plt.imshow(np.array(img))
+    plt.imshow(img)
     plt.show()
