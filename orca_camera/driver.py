@@ -454,7 +454,8 @@ class OrcaFusion:
 
         ctypes.memmove(img_raw.ctypes.data, bufframe.buf, img_raw.nbytes)
 
-        img = np.zeros((width, height))
+        img = np.zeros((height, width))
+
         for i in range(height):
             img[i] = img_raw[i * int(width):(i + 1) * int(width)]
 
