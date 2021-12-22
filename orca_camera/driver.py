@@ -296,6 +296,7 @@ class OrcaFusion:
         self.dcamapi_init_struct = DCAMAPI_INIT(size=32)
         self.lib.dcamapi_init(byref(self.dcamapi_init_struct))
         self.num_dev = self.dcamapi_init_struct.iDeviceCount
+        self._frame_call_list = []
         print(f"Found {self.num_dev} devices.")
 
     def open(self, camera_index, framebuffer_len=100):
@@ -479,6 +480,20 @@ class OrcaFusion:
         """
         self.lib.dcamcap_stop(self.camera_handle)
 
+    def register_callback(self, f):
+        """
+        Register a function to be called from the acquisition thread for each
+        new image
+        """
+        self._frame_call_list.append(f)
+
+    def deregister_callback(self, f):
+        """
+        Deregister a function from the acquisition thread call list
+        """
+        if f in self._frame_call_list:
+            self._frame_call_list.remove(f)
+
     def _acquisition_thread(self):
         # open wait handle
         waitopen = DCAMWAIT_OPEN()
@@ -505,7 +520,10 @@ class OrcaFusion:
 
             self._check_err(err)
 
-            self.frame_buffer.append(self._access_frame())
+            im = self._access_frame()
+            self.frame_buffer.append(im)
+            for f in self._frame_call_list:
+                f(im)
 
         self.lib.dcamwait_close(waitopen.hwait)
 
