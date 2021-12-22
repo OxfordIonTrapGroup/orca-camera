@@ -5,6 +5,7 @@ import os
 import numpy as np
 import collections
 import threading
+import logging
 import contextlib
 from enum import Enum
 
@@ -13,6 +14,8 @@ from ctypes.wintypes import HANDLE
 
 from .error_codes import ERROR_CODES
 from .property_codes import PROPERTY_CODES
+
+logger = logging.getLogger(__name__)
 
 # TODO: add DCAM_GUID structure
 
@@ -297,7 +300,7 @@ class OrcaFusion:
         self.lib.dcamapi_init(byref(self.dcamapi_init_struct))
         self.num_dev = self.dcamapi_init_struct.iDeviceCount
         self._frame_call_list = []
-        print(f"Found {self.num_dev} devices.")
+        logger.info(f"Found {self.num_dev} devices.")
 
     def open(self, camera_index, framebuffer_len=100):
         """
@@ -309,11 +312,11 @@ class OrcaFusion:
         self.dcamdev_open_struct = DCAMDEV_OPEN(size=32, index=camera_index)
         open_code = self.lib.dcamdev_open(byref(self.dcamdev_open_struct))
         if open_code == 1:
-            print(
+            logger.info(
                 f"Connected to camera with index {self.dcamdev_open_struct.index}."
             )
         else:
-            print("Connection to camera unsuccessful.")
+            raise Exception("Connection to camera unsuccessful.")
 
         self.camera_handle = self.dcamdev_open_struct.hdcam
         self.frame_buffer = collections.deque([], framebuffer_len)
@@ -571,10 +574,9 @@ class OrcaFusion:
             self.frame_buffer.popleft()
 
     def close(self):
-        print("Stopping acqusition thread.")
+        logger.debug("Stopping acquisition thread")
         self._stopping.set()
         self._thread.join()
+        logger.debug("Closing camera connection")
         self.lib.dcamdev_close(self.camera_handle)
-        print("Connection to camera closed.")
         self.lib.dcamapi_uninit()
-        print("DCAM-API uninitialized.")
