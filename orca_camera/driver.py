@@ -288,6 +288,8 @@ class Speed(Enum):
 
 
 class OrcaFusion:
+    SUBARRAY_QUANTISATION = 4
+
     def __init__(self):
         self.lib = LibInstance()
 
@@ -377,11 +379,22 @@ class OrcaFusion:
         """
         Set the region of interest in pixels. Pixel indexing starts from
         0 with x=0 being the leftmost pixel, and y=0 being the top pixel.
+        All the parameters must be divisible by 4
         :param xmin: leftmost pixel number
         :param xsize: horizontal extent of the region
         :param ymin: top pixel number
         :param ysize: vertical extent of the region
         """
+
+        # Check parameters all are divisible by 4
+        def check_quantisation(name, param):
+            if param % self.SUBARRAY_QUANTISATION:
+                raise ValueError(f"Subarray parameter '{name}' must be divisible by {self.SUBARRAY_QUANTISATION}")
+        check_quantisation("xmin", xmin)
+        check_quantisation("xsize", xsize)
+        check_quantisation("ymin", ymin)
+        check_quantisation("ysize", ysize)
+
         self._set_property(PROPERTY_CODES["SUBARRAYMODE"], 1)
         self._set_property(PROPERTY_CODES["SUBARRAYHPOS"], xmin)
         self._set_property(PROPERTY_CODES["SUBARRAYHSIZE"], xsize)
