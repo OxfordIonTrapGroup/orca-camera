@@ -352,6 +352,12 @@ class OrcaFusion:
 
         return result.value
 
+    def get_status(self):
+        """Reads the camera acquisition status"""
+        status = c_int32(0)
+        self.lib.dcamcap_status(self.camera_handle, byref(status))
+        return status.value
+
     def get_exposure_time(self):
         """Reads the current value of the exposure time in seconds."""
         return self._get_property(PROPERTY_CODES["EXPOSURETIME"])
