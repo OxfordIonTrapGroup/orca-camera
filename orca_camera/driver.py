@@ -7,6 +7,7 @@ import collections
 import threading
 import logging
 import contextlib
+import atexit
 from enum import Enum
 
 from ctypes import c_int32, c_uint32, c_short, c_double, c_void_p, c_char, POINTER, byref
@@ -300,8 +301,15 @@ class OrcaFusion:
         self.dcamapi_init_struct = DCAMAPI_INIT(size=32)
         self.lib.dcamapi_init(byref(self.dcamapi_init_struct))
         self.num_dev = self.dcamapi_init_struct.iDeviceCount
-        self._frame_call_list = []
         logger.info(f"Found {self.num_dev} devices.")
+
+        self._frame_call_list = []
+        self.camera_handle = None
+        atexit.register(self._cleanup)
+
+    def _cleanup(self):
+        if self.camera_handle is not None:
+            self.close()
 
     def open(self, camera_index, framebuffer_len=100):
         """
@@ -517,7 +525,7 @@ class OrcaFusion:
         ctypes.memset(byref(waitstart), 0, ctypes.sizeof(waitstart))
         waitstart.size = ctypes.sizeof(waitstart)
         waitstart.eventmask = c_int32(2)
-        waitstart.timeout = c_int32(0x80000000)
+        waitstart.timeout = c_int32(200)
 
         while True:
             if self._stopping.is_set():
@@ -526,7 +534,14 @@ class OrcaFusion:
             err = self.lib.dcamwait_start(waitopen.hwait,
                                           ctypes.pointer(waitstart))
 
-            self._check_err(err)
+            if err == 0x80000106:
+                # Wait timeout
+                continue
+            elif err == 0x80000102:
+                # Abort
+                break
+            elif err != 1:
+                self._check_err(err)
 
             im = self._access_frame()
             self.frame_buffer.append(im)
@@ -572,10 +587,17 @@ class OrcaFusion:
         while len(self.frame_buffer) > 0:
             self.frame_buffer.popleft()
 
-    def close(self):
+
+    def close(self, uninit=True):
+
         logger.debug("Stopping acquisition thread")
         self._stopping.set()
+        self.lib.dcamwait_abort(self.camera_handle)
         self._thread.join()
         logger.debug("Closing camera connection")
         self.lib.dcamdev_close(self.camera_handle)
-        self.lib.dcamapi_uninit()
+
+        if uninit:
+            self.lib.dcamapi_uninit()
+            self.lib = None
+        self.camera_handle = None
