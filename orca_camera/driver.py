@@ -9,7 +9,7 @@ import logging
 import contextlib
 from enum import Enum
 
-from ctypes import c_int32, c_short, c_double, c_void_p, c_char, POINTER, byref
+from ctypes import c_int32, c_uint32, c_short, c_double, c_void_p, c_char, POINTER, byref
 from ctypes.wintypes import HANDLE
 
 from .error_codes import ERROR_CODES
@@ -200,6 +200,7 @@ class LibInstance:
         def wrapper(f, argtypes=None):
             if argtypes is not None:
                 f.argtypes = argtypes
+            f.restype = c_uint32
             return f
 
         self.hdcam = ctypes.windll.dcamapi
@@ -327,17 +328,15 @@ class OrcaFusion:
         self._thread = threading.Thread(target=self._acquisition_thread, daemon=True)
         self._thread.start()
 
-    def _check_err(self, err):
-        err_code = hex(((abs(err) ^ 0xffffffff) + 1) & 0xffffffff)
-        if err != 1:
-            raise Exception(ERROR_CODES[err_code])
-
     def _err_code(self, err):
         if err == 1:
-            return
-        err_code = hex(((abs(err) ^ 0xffffffff) + 1) & 0xffffffff)
-
+            return None
         return ERROR_CODES[err_code]
+
+    def _check_err(self, err):
+        err_code = self._err_code(err)
+        if err_code:
+            raise Exception(ERROR_CODES[err_code])
 
     def _get_property(self, code):
         result = c_double()
