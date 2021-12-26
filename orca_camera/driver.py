@@ -330,6 +330,11 @@ class OrcaFusion:
         self.camera_handle = self.dcamdev_open_struct.hdcam
         self.frame_buffer = collections.deque([], framebuffer_len)
 
+
+        # Set the ROI to be the full image - this is the default, but
+        # this call is required to precalculate the image size
+        self.set_subarray(0,2304,0,2304)
+
         self._stopping = threading.Event()
 
         # Start image acquisition thread
@@ -419,6 +424,11 @@ class OrcaFusion:
         self._set_property(PROPERTY_CODES["SUBARRAYVSIZE"], ysize)
         self._set_property(PROPERTY_CODES["SUBARRAYMODE"], 2)
 
+        self.im_width = int(self._get_property(PROPERTY_CODES["IMAGE_WIDTH"]))
+        self.im_height = int(self._get_property(PROPERTY_CODES["IMAGE_HEIGHT"]))
+        self.im_rowbytes = int(self._get_property(PROPERTY_CODES["IMAGE_ROWBYTES"]))
+        self.im_pixel_type = int(self._get_property(PROPERTY_CODES["IMAGE_PIXELTYPE"]))
+
     def get_subarray(self):
         xmin = self._get_property(PROPERTY_CODES["SUBARRAYHPOS"])
         xsize = self._get_property(PROPERTY_CODES["SUBARRAYHSIZE"])
@@ -444,12 +454,7 @@ class OrcaFusion:
         :return: the image corresponding to the specified frame index as
         a 2D numpy array
         """
-        width = int(self._get_property(PROPERTY_CODES["IMAGE_WIDTH"]))
-        height = int(self._get_property(PROPERTY_CODES["IMAGE_HEIGHT"]))
-        rowbytes = int(self._get_property(PROPERTY_CODES["IMAGE_ROWBYTES"]))
-        pixel_type = int(self._get_property(PROPERTY_CODES["IMAGE_PIXELTYPE"]))
-
-        bsize = 2 * width * height
+        bsize = 2 * self.im_width * self.im_height
         buf = (bsize * c_int32)()
         img_raw = np.empty(bsize, dtype=np.uint16)
 
@@ -458,23 +463,23 @@ class OrcaFusion:
         bufframe.size = ctypes.sizeof(bufframe)
         bufframe.iFrame = c_int32(frame_idx)
         bufframe.buf = ctypes.cast(byref(buf), POINTER(c_void_p))
-        bufframe.rowbytes = c_int32(rowbytes)
+        bufframe.rowbytes = c_int32(self.im_rowbytes)
         bufframe.left = c_int32(0)
         bufframe.top = c_int32(0)
         bufframe.type = c_int32(0)
-        bufframe.width = c_int32(width)
-        bufframe.height = c_int32(height)
-        bufframe.type = c_int32(pixel_type)
+        bufframe.width = c_int32(self.im_width)
+        bufframe.height = c_int32(self.im_height)
+        bufframe.type = c_int32(self.im_pixel_type)
 
         err = self.lib.dcambuf_lockframe(self.camera_handle, byref(bufframe))
         self._check_err(err)
 
         ctypes.memmove(img_raw.ctypes.data, bufframe.buf, img_raw.nbytes)
 
-        img = np.zeros((height, width))
+        img = np.zeros((self.im_height, self.im_width))
 
-        for i in range(height):
-            img[i] = img_raw[i * int(width):(i + 1) * int(width)]
+        for i in range(self.im_height):
+            img[i] = img_raw[i * self.im_width:(i + 1) * self.im_width]
 
         return np.array(img)
 
