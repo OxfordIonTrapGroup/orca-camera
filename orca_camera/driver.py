@@ -397,6 +397,20 @@ class OrcaFusion:
         """
         return self._get_property(PROPERTY_CODES["INTERNALFRAMERATE"])
 
+    def get_min_trigger_interval(self):
+        """
+        Get the minimum time between two successive triggers.
+        """
+        return self._get_property(PROPERTY_CODES["TIMING_MINTRIGGERINTERVAL"])
+
+    def get_capture_status(self):
+        """Reads the capture transfer status.
+        Returns the frame count and newest frame index"""
+        status = DCAMCAP_TRANSFERINFO()
+        status.size = ctypes.sizeof(status)
+        self.lib.dcamcap_transferinfo(self.camera_handle, byref(status))
+        return status.nFrameCount, status.nNewestFrameIndex
+
     def set_subarray(self, xmin, xsize, ymin, ysize):
         """
         Set the region of interest in pixels. Pixel indexing starts from
