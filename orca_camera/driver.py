@@ -330,6 +330,12 @@ class OrcaFusion:
         self.camera_handle = self.dcamdev_open_struct.hdcam
         self.frame_buffer = collections.deque([], framebuffer_len)
 
+        self.driver_buf_len = 100
+        # The last frame buffer offset that we have read from
+        self.last_frame_ind = None
+        # The last frame stamp (incrementing index) that we have seen -
+        # we check this to ensure no missed frames
+        self.last_frame_stamp = -1
 
         # Set the ROI to be the full image - this is the default, but
         # this call is required to precalculate the image size
@@ -495,13 +501,13 @@ class OrcaFusion:
         for i in range(self.im_height):
             img[i] = img_raw[i * self.im_width:(i + 1) * self.im_width]
 
-        return np.array(img)
+        return img, bufframe.framestamp
 
     def start_capture(self):
         """
         Start capture.
         """
-        err = self.lib.dcambuf_alloc(self.camera_handle, c_int32(10))
+        err = self.lib.dcambuf_alloc(self.camera_handle, c_int32(self.driver_buf_len))
         self._check_err(err)
 
         err = self.lib.dcamcap_start(self.camera_handle, -1)
@@ -562,10 +568,28 @@ class OrcaFusion:
             elif err != 1:
                 self._check_err(err)
 
-            im = self._access_frame()
-            self.frame_buffer.append(im)
-            for f in self._frame_call_list:
-                f(im)
+            # Find out the most recently written frame index
+            _, most_recent_frame_ind = self.get_capture_status()
+
+            while self.last_frame_ind != most_recent_frame_ind:
+                if self.last_frame_ind is not None:
+                    self.last_frame_ind += 1
+                else:
+                    self.last_frame_ind = 0
+                if self.last_frame_ind >= self.driver_buf_len:
+                    self.last_frame_ind = 0
+
+                im, framestamp = self._access_frame(frame_idx=self.last_frame_ind)
+
+                if framestamp != (self.last_frame_stamp+1) & 0xffff:
+                    delta = framestamp - self.last_frame_stamp - 1
+                    logger.error(f"missed {delta} frames, {framestamp}, {self.last_frame_stamp}")
+                self.last_frame_stamp = framestamp
+
+                self.frame_buffer.append(im)
+                for f in self._frame_call_list:
+                    f(im)
+
 
         self.lib.dcamwait_close(waitopen.hwait)
 
