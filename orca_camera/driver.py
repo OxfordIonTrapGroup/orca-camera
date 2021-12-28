@@ -383,13 +383,13 @@ class OrcaFusion:
         :param time: New target value of the exposure time in seconds.
         :return: The new value of the exposure time in seconds.
         """
-        return self._set_property(PROPERTY_CODES["EXPOSURETIME"], t)
+        self._set_property(PROPERTY_CODES["EXPOSURETIME"], t)
 
     def set_readout_speed(self, speed=Speed.STANDARD):
         """
         Set the camera readout speed.
         """
-        return self._set_property(PROPERTY_CODES["READOUTSPEED"], speed)
+        self._set_property(PROPERTY_CODES["READOUTSPEED"], speed)
 
     def get_internal_frame_rate(self):
         """
@@ -441,7 +441,7 @@ class OrcaFusion:
         """
         Set the camera trigger source.
         """
-        return self._set_property(PROPERTY_CODES["TRIGGERSOURCE"], mode)
+        self._set_property(PROPERTY_CODES["TRIGGERSOURCE"], mode)
 
     def get_trigger_mode(self):
         return self._get_property(PROPERTY_CODES["TRIGGERSOURCE"])
