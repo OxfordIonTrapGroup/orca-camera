@@ -20,6 +20,28 @@ logger = logging.getLogger(__name__)
 
 # TODO: add DCAM_GUID structure
 
+class DcamIdStr(Enum):
+    DCAM_IDSTR_BUS = 0x04000101
+    DCAM_IDSTR_CAMERAID = 0x04000102
+    DCAM_IDSTR_VENDOR = 0x04000103
+    DCAM_IDSTR_MODEL = 0x04000104
+    DCAM_IDSTR_CAMERAVERSION = 0x04000105
+    DCAM_IDSTR_DRIVERVERSION = 0x04000106
+    DCAM_IDSTR_MODULEVERSION = 0x04000107
+    DCAM_IDSTR_DCAMAPIVERSION = 0x04000108
+    DCAM_IDSTR_SUBUNIT_INFO1 = 0x04000110
+    DCAM_IDSTR_SUBUNIT_INFO2 = 0x04000111
+    DCAM_IDSTR_SUBUNIT_INFO3 = 0x04000112
+    DCAM_IDSTR_SUBUNIT_INFO4 = 0x04000113
+
+    DCAM_IDSTR_CAMERA_SERIESNAME = 0x0400012c
+
+    DCAM_IDSTR_OPTICALBLOCK_MODEL = 0x04001101
+    DCAM_IDSTR_OPTICALBLOCK_ID = 0x04001102
+    DCAM_IDSTR_OPTICALBLOCK_DESCRIPTION = 0x04001103
+    DCAM_IDSTR_OPTICALBLOCK_CHANNEL_1 = 0x04001104
+    DCAM_IDSTR_OPTICALBLOCK_CHANNEL_2 = 0x04001105
+
 
 #TODO: add optional arguments
 class DCAMAPI_INIT(ctypes.Structure):
@@ -50,12 +72,7 @@ class DCAMDEV_CAPABILITY_FRAMEOPTION(ctypes.Structure):
 
 
 class DCAMDEV_STRING(ctypes.Structure):
-    _fields_ = [("size", c_int32), ("iString", c_int32), ("text", c_char),
-                ("textbytes", c_int32)]
-
-
-class DCAMDEV_STRING(ctypes.Structure):
-    _fields_ = [("size", c_int32), ("iString", c_int32), ("text", c_char),
+    _fields_ = [("size", c_int32), ("iString", c_int32), ("text", POINTER(c_char)),
                 ("textbytes", c_int32)]
 
 
@@ -196,6 +213,15 @@ class DCAMREC_STATUS(ctypes.Structure):
 class LibInstance:
     #DCAM API return codes
     return_codes = {}
+    _instance = None
+
+    @staticmethod
+    def get():
+        """Get singleton
+        """
+        if LibInstance._instance is None:
+            LibInstance._instance = LibInstance()
+        return LibInstance._instance
 
     def __init__(self):
         def wrapper(f, argtypes=None):
@@ -213,6 +239,10 @@ class LibInstance:
         self.dcamdev_open = wrapper(self.hdcam.dcamdev_open,
                                     [POINTER(DCAMDEV_OPEN)])
         self.dcamdev_close = wrapper(self.hdcam.dcamdev_close, [HANDLE])
+        self._dcamdev_getstring = wrapper(
+            self.hdcam.dcamdev_getstring,
+            [HANDLE, POINTER(DCAMDEV_STRING)],
+        )
 
         # Property control
         self.dcamprop_getattr = wrapper(
@@ -280,6 +310,23 @@ class LibInstance:
 
         # TODO: add recording control
 
+        self.dcamapi_init_struct = DCAMAPI_INIT(size=32)
+        self.dcamapi_init(byref(self.dcamapi_init_struct))
+        self.num_dev = self.dcamapi_init_struct.iDeviceCount
+        logger.info(f"Found {self.num_dev} devices.")
+
+    def dcam_getstring(self, handle, idstr):
+        buf_sz = 1024
+        buf = ctypes.create_string_buffer(buf_sz)
+        arg = DCAMDEV_STRING()
+        ctypes.memset(byref(arg), 0, ctypes.sizeof(arg))
+        arg.size = ctypes.sizeof(arg)
+        arg.iString = idstr
+        arg.text = buf
+        arg.textbytes = buf_sz
+        self._dcamdev_getstring(handle, arg)
+        return ctypes.string_at(buf, buf_sz).strip(b"\x00").decode()
+
 
 class Trigger(Enum):
     INTERNAL = 1
@@ -295,36 +342,22 @@ class Speed(Enum):
 class OrcaFusion:
     SUBARRAY_QUANTISATION = 4
 
-    def __init__(self):
-        self.lib = LibInstance()
-
-        self.dcamapi_init_struct = DCAMAPI_INIT(size=32)
-        self.lib.dcamapi_init(byref(self.dcamapi_init_struct))
-        self.num_dev = self.dcamapi_init_struct.iDeviceCount
-        logger.info(f"Found {self.num_dev} devices.")
-
-        self._frame_call_list = []
-        self.camera_handle = None
-        atexit.register(self._cleanup)
-
-    def _cleanup(self):
-        if self.camera_handle is not None:
-            self.close()
-
-    def open(self, camera_index, framebuffer_len=100):
+    def __init__(self, camera_index, framebuffer_len=100):
         """
         Open a connection to the camera.
         :param camera_index: index of the camera to connect to
         :param framebuffer_len: maximum number of stored frames before
         oldest are discarded
         """
+        self.lib = LibInstance.get()
+
+        self._frame_call_list = []
+        self.camera_handle = None
+        atexit.register(self._cleanup)
+
         self.dcamdev_open_struct = DCAMDEV_OPEN(size=32, index=camera_index)
         open_code = self.lib.dcamdev_open(byref(self.dcamdev_open_struct))
-        if open_code == 1:
-            logger.info(
-                f"Connected to camera with index {self.dcamdev_open_struct.index}."
-            )
-        else:
+        if open_code != 1:
             raise Exception("Connection to camera unsuccessful.")
 
         self.camera_handle = self.dcamdev_open_struct.hdcam
@@ -347,10 +380,27 @@ class OrcaFusion:
         self._thread = threading.Thread(target=self._acquisition_thread, daemon=True)
         self._thread.start()
 
+        self.strs = {
+            e: self.lib.dcam_getstring(self.camera_handle, e.value)
+            for e in DcamIdStr
+        }
+
+        logger.info(
+            f"Connected to camera with index {self.dcamdev_open_struct.index}."
+            f"serial: {self.get_serial()} model: {self.strs[DcamIdStr.DCAM_IDSTR_MODEL]}"
+        )
+
+    def get_serial(self):
+        return self.strs[DcamIdStr.DCAM_IDSTR_CAMERAID]
+
+    def _cleanup(self):
+        if self.camera_handle is not None:
+            self.close()
+
     def _err_code(self, err):
         if err == 1:
             return None
-        return ERROR_CODES[err_code]
+        return ERROR_CODES[err]
 
     def _check_err(self, err):
         err_code = self._err_code(err)
